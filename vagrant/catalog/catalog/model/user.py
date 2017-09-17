@@ -5,11 +5,12 @@ from base import *
 
 class User(Base):
 
-    def __init__(self, name, image):
+    def __init__(self, id, name, image):
+        self.id = id
         self.name = name
         self.image = image
 
     __tablename__ = 'user'
-    id = Column(Integer, primary_key=True)
+    id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
-    image = Column(Text)
+    image = Column(String)

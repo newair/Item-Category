@@ -1,7 +1,10 @@
 import random
 import string
+from functools import wraps
 
 from flask import Flask, request, render_template, redirect, url_for, flash
+
+from catalog.model.user import User
 from db_setup import *
 from catalog import app
 
@@ -102,7 +105,7 @@ def gconnect():
     login_session['gplus_id'] = gplus_id
     print login_session['access_token']
     # Get user info
-    userinfo_url = "https://www.googleapis.com/oauth2/v1/userinfo"
+    userinfo_url = "https://www.googleapis.com/oauth2/v2/userinfo"
     params = {'access_token': credentials.access_token, 'alt': 'json'}
     answer = requests.get(userinfo_url, params=params)
 
@@ -112,6 +115,15 @@ def gconnect():
     login_session['picture'] = data['picture']
     login_session['user_id'] = data['id']
     #login_session['email'] = data['email']
+
+    user = session.query(User).filter_by(id=login_session['user_id']).first()
+
+    # if user not available create it
+    if user is None:
+        user = User(name=login_session['username'], image=login_session['picture'],
+                    id=login_session['user_id'])
+        session.add(user)
+        session.commit()
 
     output = ''
     output += '<h1>Welcome, '
@@ -138,7 +150,7 @@ def prepare_successful_status(message):
 
 
 def get_credentials_object(code):
-    oauth_flow = flow_from_clientsecrets('client_secret.json', scope='https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile')
+    oauth_flow = flow_from_clientsecrets('client_secret.json', scope='https://www.googleapis.com/auth/calendar')
     oauth_flow.redirect_uri = "postmessage"
     credentials = oauth_flow.step2_exchange(code)
     return credentials
@@ -153,10 +165,10 @@ def verify_access_token(access_token):
 
 def revoke_access_token(access_token):
     print access_token
-    url = ("https://accounts.google.com/o/oauth2/revoke?token='%s'" % access_token)
+    url = ("https://accounts.google.com/o/oauth2/revoke?token=%s" % access_token)
     h = httplib2.Http()
-    response = h.request(url, 'GET')[1]
-    return response
+    response = h.request(url, 'GET')
+    return response[0]
 
 
 @app.route('/gdisconnect')
@@ -169,25 +181,29 @@ def gdisconnect():
 
 # Clear all login_session variables if revocation is successful on google servers
     if results['status'] == '200':
-        del login_session['credentials']
         del login_session['username']
         del login_session['picture']
-        del login_session['gplus_id']
         del login_session['access_token']
-        del login_session['state']
     else:
         return prepare_invalid_login_status('Revocation of access token on server failed.')
 
     return prepare_successful_status('Successfully logged out')
 
 
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in login_session:
+            return redirect('/login')
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 # Routing end points for items
 @app.route('/add/item/<int:cat_id>', methods=['GET', 'POST'])
+@login_required
 def add_item(cat_id=None):
     """This will render add html form and save the filled form"""
-
-    if 'username' not in login_session:
-        return redirect('/login')
 
     if cat_id:
         category = session.query(Category).filter_by(id=cat_id).first()
@@ -204,7 +220,9 @@ def add_item(cat_id=None):
     else:
         return redirect('/')
 
-@app.route('/edit/item/<int:cat_id>/<int:item_id>', methods=['GET','POST'])
+
+@app.route('/edit/item/<int:cat_id>/<int:item_id>', methods=['GET', 'POST'])
+@login_required
 def edit_item(cat_id, item_id):
     """This will edit an existing item. category id is not needed,
        but it is taken in order to keep consistency in the URL
@@ -225,11 +243,11 @@ def edit_item(cat_id, item_id):
     else:
         return redirect("/")
 
-@app.route('/delete/<int:item_id>',methods=['GET','POST'])
+
+@app.route('/delete/<int:item_id>',methods=['GET', 'POST'])
+@login_required
 def delete_item(item_id):
     """This route will delete an item"""
-    if 'username' not in login_session:
-        return redirect('/login')
 
     if item_id:
         item = session.query(Item).filter_by(id=item_id).first()
@@ -240,18 +258,18 @@ def delete_item(item_id):
             session.commit()
     return redirect("/")
 
+
 @app.route('/description/<int:cat_id>/<int:item_id>')
 def description_item(cat_id, item_id):
     """This will render the descrition view"""
     return render_template("description.html", category=category, item=item)
 
+
 # Routing end points for categories
-@app.route('/add/category/', methods=['GET','POST'])
+@app.route('/add/category/', methods=['GET', 'POST'])
+@login_required
 def add_category():
     """This will render add html form"""
-
-    if 'username' not in login_session:
-        return redirect('/login')
 
     if request.method == 'GET':
         return render_template("add_category.html")
@@ -262,12 +280,11 @@ def add_category():
         session.commit()
         return redirect(url_for("index"))
 
-@app.route('/edit/category/<int:cat_id>',methods=['GET','POST'])
+
+@app.route('/edit/category/<int:cat_id>', methods=['GET', 'POST'])
+@login_required
 def edit_category(cat_id):
     """This will edit an existing category"""
-
-    if 'username' not in login_session:
-        return redirect('/login')
 
     if cat_id:
         category = session.query(Category).filter_by(id=cat_id).first()
@@ -282,12 +299,11 @@ def edit_category(cat_id):
     else:
         return redirect("/")
 
+
 @app.route('/delete/<int:cat_id>')
+@login_required
 def delete_category(cat_id):
     """Deleting category"""
-
-    if 'username' not in login_session:
-        return redirect('/login')
 
     if cat_id:
         category = session.query(Category).filter_by(id=cat_id).first()
