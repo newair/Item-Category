@@ -33,6 +33,18 @@ CLIENT_ID = json.loads(
 APPLICATION_NAME = "Item Catalog"
 
 
+def render_template_with_session(template, **params):
+    if params is not None:
+        session_params = params
+    else:
+        session_params = []
+    session_params['login_session'] = login_session
+    return render_template(template, **session_params)
+
+
+def redirect_to_first_available_category():
+    return redirect('/'+str(session.query(Category).first().id))
+
 @app.route('/')
 @app.route('/<int:cat_id>')
 def index(cat_id=None):
@@ -43,19 +55,19 @@ def index(cat_id=None):
             # Fetch the content according to the id
             sub_items = session.query(Item).filter_by(cat_id=cat_id)
             category = session.query(Category).filter_by(id=cat_id).first()
-            return render_template("index.html", categories=main_categories, items=sub_items,
-                                   selected_category=category)
+            return render_template_with_session("index.html", categories=main_categories, items=sub_items,
+                                                selected_category=category)
         else:
-            return redirect('/1')
+            return redirect_to_first_available_category()
     else:
-        return render_template("index.html")
+        return render_template_with_session("index.html")
 
 
 @app.route('/login')
 def showLogin():
     state = ''.join(random.choice(string.ascii_uppercase + string.digits) for x in xrange(32))
     login_session['state'] = state
-    return render_template('login.html', STATE=state)
+    return render_template_with_session('login.html', STATE=state)
 
 
 @app.route('/gconnect', methods=['POST'])
@@ -114,14 +126,14 @@ def gconnect():
     login_session['username'] = data['name']
     login_session['picture'] = data['picture']
     login_session['user_id'] = data['id']
-    #login_session['email'] = data['email']
-
+    login_session['email'] = data['email']
+    print 'users id',login_session['user_id']
     user = session.query(User).filter_by(id=login_session['user_id']).first()
 
     # if user not available create it
     if user is None:
         user = User(name=login_session['username'], image=login_session['picture'],
-                    id=login_session['user_id'])
+                    id=login_session['user_id'], email=login_session['email'])
         session.add(user)
         session.commit()
 
@@ -150,7 +162,7 @@ def prepare_successful_status(message):
 
 
 def get_credentials_object(code):
-    oauth_flow = flow_from_clientsecrets('client_secret.json', scope='https://www.googleapis.com/auth/calendar')
+    oauth_flow = flow_from_clientsecrets('client_secret.json', scope='')
     oauth_flow.redirect_uri = "postmessage"
     credentials = oauth_flow.step2_exchange(code)
     return credentials
@@ -181,19 +193,19 @@ def gdisconnect():
 
 # Clear all login_session variables if revocation is successful on google servers
     if results['status'] == '200':
-        del login_session['username']
-        del login_session['picture']
-        del login_session['access_token']
+        login_session.clear()
+
     else:
         return prepare_invalid_login_status('Revocation of access token on server failed.')
 
-    return prepare_successful_status('Successfully logged out')
+    return redirect_to_first_available_category()
 
 
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'username' not in login_session:
+            flash('You are not authorized')
             return redirect('/login')
         return f(*args, **kwargs)
     return decorated_function
@@ -209,11 +221,11 @@ def add_item(cat_id=None):
         category = session.query(Category).filter_by(id=cat_id).first()
         if request.method == "GET":
             category = session.query(Category).filter_by(id=cat_id).first()
-            return render_template("add_item.html", category=category)
+            return render_template_with_session("add_item.html", category=category)
         else:
             name = request.form["name"]
             description = request.form["description"]
-            new_item = Item(name=name, description=description, cat_id=cat_id)
+            new_item = Item(name=name, description=description, cat_id=cat_id, user_id=login_session['user_id'])
             session.add(new_item)
             session.commit()
             return redirect('/')
@@ -228,41 +240,53 @@ def edit_item(cat_id, item_id):
        but it is taken in order to keep consistency in the URL
     """
     if cat_id and item_id:
-        if request.method == 'GET':
-            item = session.query(Item).filter_by(id=item_id).first()
-            return render_template("edit_item.html", category=item.category, item=item)
+        item = session.query(Item).filter_by(id=item_id).first()
+        if item.user_id == login_session['user_id']:
+
+            if request.method == 'GET':
+                return render_template_with_session("edit_item.html", category=item.category, item=item)
+            else:
+                name = request.form["name"]
+                description = request.form["description"]
+                item.name = name
+                item.description = description
+                session.add(item)
+                session.commit()
+                return redirect("/")
         else:
-            item = session.query(Item).filter_by(id=item_id).first()
-            name = request.form["name"]
-            description = request.form["description"]
-            item.name = name
-            item.description = description
-            session.add(item)
-            session.commit()
+            flash('You are not authorized to edit this item')
             return redirect("/")
+
     else:
         return redirect("/")
 
 
-@app.route('/delete/<int:item_id>',methods=['GET', 'POST'])
+@app.route('/delete_item/<int:item_id>',methods=['GET', 'POST'])
 @login_required
 def delete_item(item_id):
     """This route will delete an item"""
 
     if item_id:
         item = session.query(Item).filter_by(id=item_id).first()
-        if request.method == 'GET':
-            return render_template("delete_item.html", item=item)
+
+        if item.user_id == login_session['user_id']:
+            if request.method == 'GET':
+                return render_template_with_session("delete_item.html", item=item)
+            else:
+                session.delete(item)
+                session.commit()
         else:
-            session.delete(item)
-            session.commit()
+            flash('You are not authorized to delete this item')
+            return redirect("/")
+
+
     return redirect("/")
 
 
 @app.route('/description/<int:cat_id>/<int:item_id>')
 def description_item(cat_id, item_id):
     """This will render the descrition view"""
-    return render_template("description.html", category=category, item=item)
+    return render_template_with_session("description.html", category=category, item=item)
 
 
 # Routing end points for categories
@@ -272,10 +296,10 @@ def add_category():
     """This will render add html form"""
 
     if request.method == 'GET':
-        return render_template("add_category.html")
+        return render_template_with_session("add_category.html")
     else:
         name = request.form["name"]
-        newItem = Category(name=name)
+        newItem = Category(name=name, user_id=login_session['user_id'])
         session.add(newItem)
         session.commit()
         return redirect(url_for("index"))
@@ -288,28 +312,36 @@ def edit_category(cat_id):
 
     if cat_id:
         category = session.query(Category).filter_by(id=cat_id).first()
-        if request.method == 'GET':
-            return render_template("edit_category.html", category=category)
+        if category.user_id == login_session['user_id']:
+            if request.method == 'GET':
+                return render_template_with_session("edit_category.html", category=category)
+            else:
+                name = request.form["name"]
+                category.name = name
+                session.add(category)
+                session.commit()
+                return redirect("/")
         else:
-            name = request.form["name"]
-            category.name = name
-            session.add(category)
-            session.commit()
+            flash('You are not authorized to edit this page')
             return redirect("/")
     else:
         return redirect("/")
 
 
-@app.route('/delete/<int:cat_id>')
+@app.route('/delete_category/<int:cat_id>', methods=['GET', 'POST'])
 @login_required
 def delete_category(cat_id):
     """Deleting category"""
 
     if cat_id:
         category = session.query(Category).filter_by(id=cat_id).first()
-        if request.method == 'GET':
-            return render_template("delete_category.html", category=category)
+        if category.user_id == login_session['user_id']:
+
+            if request.method == 'GET':
+                return render_template("delete_category.html", category=category)
+            else:
+                session.delete(category)
+                session.commit()
         else:
-            session.delete(category)
-            session.commit()
+            flash('You are not authorized to delete this page')
     return redirect("/")

@@ -12,7 +12,6 @@ class Category(Base):
 
     __tablename__ = 'categories'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("user.id"))
+    user_id = Column(String, ForeignKey("user.id"))
     name = Column(String)
-    items = relationship("Item", back_populates="category")
-
+    items = relationship("Item", back_populates="category", cascade="all,delete")
