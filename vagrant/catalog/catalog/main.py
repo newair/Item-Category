@@ -1,32 +1,19 @@
+import json
 import random
 import string
 from functools import wraps
 
-from flask import Flask, request, render_template, redirect, url_for, flash
+import httplib2
+import requests
+from flask import make_response, jsonify
+from flask import request, render_template, redirect, url_for, flash
+from flask import session as login_session
+from oauth2client.client import FlowExchangeError
+from oauth2client.client import flow_from_clientsecrets
 
+from catalog import app
 from catalog.model.user import User
 from db_setup import *
-from catalog import app
-
-from flask import session as login_session
-
-from oauth2client.client import flow_from_clientsecrets
-from oauth2client.client import FlowExchangeError
-import httplib2
-import json
-from flask import make_response
-import requests
-import os
-
-
-#Fake Restaurants
-category = {'name': 'The CRUDdy Crab', 'id': '1'}
-
-categories = [{'name': 'The CRUDdy Crab', 'id': '1'}, {'name':'Blue Burgers', 'id':'2'},{'name':'Taco Hut', 'id':'3'}]
-
-#Fake Menu Items
-items = [ {'name':'Cheese Pizza', 'description':'made with fresh cheese', 'price':'$5.99','course' :'Entree', 'id':'1', 'cat_id': '1'}, {'name':'Chocolate Cake','description':'made with Dutch Chocolate', 'price':'$3.99', 'course':'Dessert','id':'2', 'cat_id': '2'},{'name':'Caesar Salad', 'description':'with fresh organic vegetables','price':'$5.99', 'course':'Entree','id':'3'},{'name':'Iced Tea', 'description':'with lemon','price':'$.99', 'course':'Beverage','id':'4'},{'name':'Spinach Dip', 'description':'creamy dip with fresh spinach','price':'$1.99', 'course':'Appetizer','id':'5', 'cat_id': '3'} ]
-item =  {'name':'Cheese Pizza','description':'made with fresh cheese','price':'$5.99','course' :'Entree'}
 
 CLIENT_ID = json.loads(
     open('client_secret.json', 'r').read())['web']['client_id']
@@ -37,7 +24,7 @@ def render_template_with_session(template, **params):
     if params is not None:
         session_params = params
     else:
-        session_params = []
+        session_params = dict()
     session_params['login_session'] = login_session
     return render_template(template, **session_params)
 
@@ -45,16 +32,20 @@ def render_template_with_session(template, **params):
 def redirect_to_first_available_category():
     return redirect('/'+str(session.query(Category).first().id))
 
+
 @app.route('/')
 @app.route('/<int:cat_id>')
 def index(cat_id=None):
     """This is the root of the application"""
     main_categories = session.query(Category)
-    if main_categories:
+    if main_categories.count() > 0:
         if cat_id:
             # Fetch the content according to the id
             sub_items = session.query(Item).filter_by(cat_id=cat_id)
             category = session.query(Category).filter_by(id=cat_id).first()
+
+            if sub_items.count() == 0:
+                sub_items = dict()
             return render_template_with_session("index.html", categories=main_categories, items=sub_items,
                                                 selected_category=category)
         else:
@@ -64,7 +55,7 @@ def index(cat_id=None):
 
 
 @app.route('/login')
-def showLogin():
+def show_login():
     state = ''.join(random.choice(string.ascii_uppercase + string.digits) for x in xrange(32))
     login_session['state'] = state
     return render_template_with_session('login.html', STATE=state)
@@ -218,7 +209,6 @@ def add_item(cat_id=None):
     """This will render add html form and save the filled form"""
 
     if cat_id:
-        category = session.query(Category).filter_by(id=cat_id).first()
         if request.method == "GET":
             category = session.query(Category).filter_by(id=cat_id).first()
             return render_template_with_session("add_item.html", category=category)
@@ -279,14 +269,18 @@ def delete_item(item_id):
             flash('You are not authorized to delete this item')
             return redirect("/")
 
-
     return redirect("/")
 
 
-@app.route('/description/<int:cat_id>/<int:item_id>')
-def description_item(cat_id, item_id):
+@app.route('/description/<int:item_id>')
+def description_item(item_id):
     """This will render the descrition view"""
-    return render_template_with_session("description.html", category=category, item=item)
+    item = session.query(Item).filter_by(id=item_id).first()
+    if item is not None:
+        category = item.category
+        return render_template_with_session("description.html", category=category, item=item)
+    else:
+        redirect_to_first_available_category()
 
 
 # Routing end points for categories
@@ -338,10 +332,42 @@ def delete_category(cat_id):
         if category.user_id == login_session['user_id']:
 
             if request.method == 'GET':
-                return render_template("delete_category.html", category=category)
+                return render_template_with_session("delete_category.html", category=category)
             else:
                 session.delete(category)
                 session.commit()
         else:
             flash('You are not authorized to delete this page')
     return redirect("/")
+
+
+# JSON end points
+
+@app.route('/json/item/<int:item_id>')
+def item_json(item_id):
+    """This will give json output for a given item"""
+    item = session.query(Item).filter_by(id=item_id).first()
+    if item is not None:
+        return jsonify(item.serialize)
+    else:
+        return jsonify({})
+
+
+@app.route('/json/category/<int:cat_id>')
+def category_json(cat_id):
+    """This will give json output for a given category"""
+    category = session.query(Category).filter_by(id=cat_id).first()
+    if category is not None:
+        return jsonify(category.serialize)
+    else:
+        return jsonify({})
+
+
+@app.route('/json')
+def all_items_and_categories():
+    """This will give json output for all the items in each category"""
+    categories = session.query(Category)
+    if categories.count() > 0:
+        return jsonify([category.serialize for category in categories])
+    else:
+        return jsonify({})

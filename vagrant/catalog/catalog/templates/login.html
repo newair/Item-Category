@@ -10,17 +10,13 @@
       data-cookiepolicy="single_host_origin"
       data-callback="signInCallBack"
       data-approvalprompt="force">
-
 </span>
-
 </div>
 
 <div id="result"></div>
 
 <script>
-
     function signInCallBack(authResult) {
-
         if(authResult['code']){
 
             $('#signinButton').attr('style', 'display:none');
@@ -50,9 +46,6 @@
             })
 
         }
-
     }
-
-
 </script>
 {% endblock %}

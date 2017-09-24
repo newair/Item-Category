@@ -13,7 +13,7 @@
     <!--Main categories are deisplayed  -->
     <ul>
         {% for category in categories %}
-        <li><a href= url_for("",cat_id=category.id)>{{category.name}}</a></li>
+        <li><a href={{ url_for("index",cat_id=category.id) }} >{{category.name}}</a></li>
         {% endfor %}
     </ul>
 </div>
@@ -25,11 +25,11 @@
 
     <!--Sub categories are displayed  -->
     {% for item in items %}
-        <li>{{item.name}}
+        <li><a href="{{ url_for("description_item",cat_id=item.cat_id, item_id= item.id) }}">{{item.name}}</a>
             <a href="{{ url_for("edit_item",cat_id=item.cat_id, item_id= item.id) }}"> edit</a>
             <a href="{{ url_for("delete_item", item_id=item.id) }}"> Delete Item</a>
         </li>
-        {% endfor %}
+    {% endfor %}
 </div>
 
 {% endblock %}

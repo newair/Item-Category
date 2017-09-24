@@ -13,9 +13,18 @@ class Item(Base):
 
     __tablename__ = 'items'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("user.id"))
+    user_id = Column(String, ForeignKey("user.id"))
     cat_id = Column(Integer, ForeignKey("categories.id"))
     name = Column(String)
     description = Column(Text)
     category = relationship("Category", back_populates="items")
 
+    @property
+    def serialize(self):
+        # serialized item data
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'cat_id': self.cat_id
+        }
